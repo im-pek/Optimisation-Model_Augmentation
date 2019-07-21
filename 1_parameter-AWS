@@ -1,0 +1,731 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import random as rand
+import copy
+import math as m
+import random
+import boto3
+import datetime
+from decimal import *
+import uuid 
+from decimal import Decimal
+import statsmodels.api as sm
+import pandas as pd
+from time import sleep, strftime
+from scipy.spatial import distance
+
+
+every_round_parameters=[] #to be outside the main 'def' (if any)
+final_best_params=[] #to be outside the main 'def' (if any)
+
+
+
+#PLANT MODELLING STARTS (INCLUDES LINEAR REGRESSION)
+    
+session = boto3.Session(
+    # Hard coded strings as credentials, not recommended.
+    aws_access_key_id='<insert AWS Access Key ID>',
+    aws_secret_access_key='<insert AWS Secret Access Key>'
+)
+
+dynamodb = session.resource('dynamodb')
+
+d = datetime.datetime.utcnow()
+epoch = datetime.datetime(1970,1,1)
+t = (d - epoch).total_seconds()
+
+table2 = dynamodb.Table('LinearRegressionInputs')
+
+
+def getColumn1Itemsz():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list1z = []
+    for i in response['Items']:
+        list1z.append(i['CurrentGrowth'])
+    return list1z
+   
+column1z=getColumn1Itemsz()
+
+
+def getColumn2Itemsz():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list2z = []
+    for i in response['Items']:
+        list2z.append(i['X^3_Augmented'])
+    return list2z
+   
+column2z=getColumn2Itemsz()
+
+
+def getColumn3Itemsz():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list3z = []
+    for i in response['Items']:
+        list3z.append(i['X^2_Augmented'])
+    return list3z
+   
+column3z=getColumn3Itemsz()
+
+
+def getColumn4Itemsz():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list4z = []
+    for i in response['Items']:
+        list4z.append(i['X^1_Augmented'])
+    return list4z
+   
+column4z=getColumn4Itemsz()
+
+
+def getColumn5Itemsz():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list5z = []
+    for i in response['Items']:
+        list5z.append(i['X^0_Augmented'])
+    return list5z
+   
+column5z=getColumn5Itemsz()
+
+
+def getColumn1Items():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list1 = []
+    for i in response['Items']:
+        list1.append(i['CurrentGrowth'])
+    return list1
+   
+column1=getColumn1Items()
+
+
+def getColumn2Items():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list2 = []
+    for i in response['Items']:
+        list2.append(i['X^3'])
+    return list2
+   
+column2=getColumn2Items()
+
+
+def getColumn3Items():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list3 = []
+    for i in response['Items']:
+        list3.append(i['X^2'])
+    return list3
+   
+column3=getColumn3Items()
+
+
+def getColumn4Items():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list4 = []
+    for i in response['Items']:
+        list4.append(i['X^1'])
+    return list4
+   
+column4=getColumn4Items()
+
+
+def getColumn5Items():
+    dynamodb = session.resource('dynamodb')
+    table2 = dynamodb.Table('LinearRegressionInputs')
+    response = table2.scan()
+
+    list5 = []
+    for i in response['Items']:
+        list5.append(i['X^0'])
+    return list5
+   
+column5=getColumn5Items()
+
+
+#TRANSPOSE X AND Y (AXES) VALUES
+
+column_1=column1+column1z
+column_2=column2+column2z
+column_3=column3+column3z
+column_4=column4+column4z
+column_5=column5+column5z
+
+every_round_parameters.append(column_1)
+every_round_parameters.append(column_2)
+every_round_parameters.append(column_3)
+every_round_parameters.append(column_4)
+every_round_parameters.append(column_5)
+
+transposed=list(map(list, zip(*every_round_parameters)))
+
+df1=pd.DataFrame(transposed,columns=['G','X3','X2','X1','Constant'])
+print (df1)
+
+reg1 = sm.OLS(endog=df1['G'].astype(float), exog=df1[['X3','X2','X1','Constant']].astype(float), missing='drop')
+type(reg1)
+
+results = reg1.fit()
+type(results)
+
+print(results.summary())
+
+coefficients=[]
+
+coefficients.append(results.params[3])
+coefficients.append(results.params[2])
+coefficients.append(results.params[1])
+coefficients.append(results.params[0])    
+
+# =============================================================================
+#     print ('Coefficients (a,b,c,d) for 1st parameter, x, in a+bx+cx^2+dx^3 format: ')
+#     print (coefficients)
+# =============================================================================
+
+
+
+
+
+#GENETIC ALGORITHM (GA) STARTS
+
+## Initialisation   
+def create_starting_population(size, dict):    
+    #this just creates a population of different params combinations of a fixed size.
+    #here we unpack the dictionary to see how long our gene needs to be, para_length is a list of the lengths of the parameter lists
+    para_length = []
+    for i in dict.keys():
+        para_length.append(len(dict[i]))
+        
+    #Find out how many bits is required to encode each parameter (size of each allele) eg. [4,4]
+    code_length = []
+    for i in para_length:
+        code_length.append(m.ceil(m.log(i,2)))    
+        
+    #we initalize a random population
+    population = []    
+    for i in range(0,size):
+        population.append(create_new_member(para_length, code_length))
+        
+    return population, code_length, para_length
+#      
+def create_new_member(para_length, code_length):  
+    #takes in a list which contains information about how long is the list for each parameter eg. [9,9]
+    #returns a list of a gene, which encodes the information for each allele (parameter) into a long list eg. [0, 1, 1, 0, 1, 0, 0, 0]
+    
+    #generates 1 child
+    member = []
+    for i in range(0,len(para_length)):
+        #random int between 1-length
+        uncoded_rand_number = m.floor(rand.uniform(0,para_length[i]))
+        #convert this number to a binary list
+        member = member + encode_binary(uncoded_rand_number, code_length[i])
+    
+    return member
+#
+def encode_binary(number, length):
+    #takes in an number to be converted (int) and the size of string (int) (eg, 3,8)
+    #returns a list of converted number in binary [0, 0, 0, 0, 0, 0, 1, 1]
+    binary_list = [int(x) for x in bin(number)[2:]]
+    if length > len(binary_list):
+        temp = [0]* (length-len(binary_list))
+        binary_list = temp+binary_list
+    return binary_list
+    
+    member.append(round(rand.uniform(0,1)))  
+    return list  
+##  
+
+## Scoring
+
+def score_population(population, metadata):
+    #scores the individual members of the population based on the fitness
+    scores = []
+    
+    for i in range(0, len(population)):
+        scores += [fitness(population[i], metadata)]
+    
+    return scores
+    
+def fitness(member, metadata):
+    #Decode the gene and run parameters into model to get score
+    #Debug line: #print("Parsing Member: {}".format(member))
+    score = 0
+    values = []
+    
+    #Unpack Metadata
+    code_length = metadata[0]
+    para_length = metadata[1]
+    dict = metadata[2]
+    dict_keys = metadata[3]
+    
+    #Decode Gene to the numbers here 
+    values,errorflag = decode(dict, dict_keys, code_length, member)
+    
+    if errorflag == 0:
+        #Calculate score here
+        score = model(member, code_length, values)
+
+    return score
+    
+def decode(dict, dict_keys, code_length, member):
+    #Takes in dict, dict_keys, code length and list of binary, returns respective values from dictionary
+    #(eg. gene [0, 1, 0, 1, 0, 1, 1, 1] with code_length [4,4] -> [5, 7])
+    #(eg. gene [0, 1, 0, 1, 0, 1, 1, 1] with code_length [3,4,1] -> [2, 11, 1])
+    start_pointer = 0
+    list_of_decoded_numbers = []
+    values = []
+    errorflag = 1
+    
+    for i in code_length:
+        #iterate through the alleles
+        binary_to_be_decoded=[] #temp array to store allele information
+        for j in range(start_pointer,start_pointer+i):
+            #add number into temp array
+            binary_to_be_decoded.append(member[j])
+        #change start position (for next allele to be read)
+        start_pointer = start_pointer+i
+        #Convert "binary_to_be_decoded" into a string and then make the binary to decimal conversion
+        list_of_decoded_numbers.append(int("".join(map(str,binary_to_be_decoded)), base=2))
+    
+    #Check if number of parameters match the lists stored in the dictionary
+    if len(dict_keys) != len(list_of_decoded_numbers):
+        print("!!! \n ************************ WARNING ************************ \n Parameter number mismatch! \n Parsing {} parameters but dictionary only has {} lists \n!!!".format(len(list_of_decoded_numbers),dict.keys()))
+    
+    else:
+        #Extract values from parameter list
+        for i in range(0,len(list_of_decoded_numbers)):
+            try:
+                values.append(dict[dict_keys[i]][list_of_decoded_numbers[i]]) 
+                errorflag = 0
+            except:
+                #print("Child's Parameters exceeded defined range, culling sample.")
+                errorflag = 2
+        
+        
+    return values, errorflag
+#
+# 
+def pick_mate(scores):
+    #not sure what this does, probably pick a good mate or something?
+    #refer to here: https://github.com/gmichaelson/GA_in_python/blob/master/GA%20example.ipynb
+    array = np.array(scores)
+    temp = array.argsort()
+    ranks = np.empty_like(temp)
+    ranks[temp] = np.arange(len(array))
+
+    fitness = [len(ranks) - x for x in ranks]
+    
+    cum_scores = copy.deepcopy(fitness)
+    
+    for i in range(1,len(cum_scores)):
+        cum_scores[i] = fitness[i] + cum_scores[i-1]
+        
+    probs = [x / cum_scores[-1] for x in cum_scores]
+    
+    randomnum = rand.random()
+    
+    for i in range(0, len(probs)):
+        if randomnum < probs[i]:
+            
+            return i
+#
+#
+def crossover(a,b):
+    
+    if len(a) != len(b):
+        print("!!! \n ************************ WARNING ************************ \n Mating Partner mismatch! Length of partners are different! \n Attempted to mate {} with {} \n!!!".format(a,b))
+        return a,b
+    
+    new_a = []
+    new_b = []
+    cut = m.floor(rand.uniform(0,len(a))) #crossover point
+    
+    new_a1 = copy.deepcopy(a[0:cut])
+    new_a2 = copy.deepcopy(b[cut:])
+    
+    new_b1 = copy.deepcopy(b[0:cut])
+    new_b2 = copy.deepcopy(a[cut:])
+    
+    new_a = new_a1 + new_a2
+    new_b = new_b1 + new_b2
+    
+    if len(new_a) != len(new_b):
+        print("!!! \n ************************ WARNING ************************ \n Children length mismatch! Length of Children are different! \n Children {} and {} \n!!!".format(new_a,new_b))
+        return a,b
+       
+    return new_a, new_b
+#
+#   
+def mutate (member, probability):
+    output = copy.deepcopy(member)
+    for i in range(0,len(member)):
+        if rand.random() < probability:
+            output[i] = int(member[i] == 0)
+    return output
+#
+#    
+    
+def RunGA(list, dict, number_of_iteration):
+    population_size = 30
+    number_of_couples = 9
+    number_of_winners_to_keep = 2
+    mutation_probability = 0.05
+    number_of_groups = 1
+    best_growth_score_GA=0
+
+    
+    best_growth_params = ['0000000000'] #'000000000' SYMBOLISES 'OUT OF PRE-STIPULATED RANGE'; A NEW RANDOM POINT WILL BE SAMPLED.
+    # create the starting population
+    population, code_length, para_length = create_starting_population(population_size, dict)
+    
+    metadata = (code_length, para_length, dict, list)
+ 
+    # run the iterations
+    plots=[]
+    for i in range(0,number_of_iterations):
+        new_population = []
+        
+        # evaluate the fitness of the current population
+        scores = score_population(population, metadata)
+        best_member = population[np.argmax(scores)] #best member of the population
+        growth_score = max(scores) #best score
+#            print (best_growth_score_GA)            
+        if growth_score > best_growth_score_GA:
+            best_growth_score_GA = growth_score
+            best_growth_params, errorflag = decode(dict, list, code_length, best_member)
+        print('Iteration {}: Best growth so far is {}. Using {} of {}'.format(i, best_growth_score_GA, best_growth_params,list))
+
+        
+        # allow members of the population to breed based on their relative score; 
+            # i.e., if their score is higher they're more likely to breed
+        for j in range(0, number_of_couples):  
+            new_1, new_2 = crossover(population[pick_mate(scores)], population[pick_mate(scores)])
+            new_population = new_population + [new_1, new_2]
+  
+        # mutate (maybe problem with deepcopy?)
+        for j in range(0, len(new_population)):
+            new_population[j] = copy.deepcopy(mutate(new_population[j], 0.05))
+        
+         
+        # keep members of previous generation
+        new_population += [population[np.argmax(scores)]]
+        for j in range(1, number_of_winners_to_keep):
+            keeper = pick_mate(scores)            
+            new_population += [population[keeper]]
+            
+        # add new random members
+        while len(new_population) < population_size:
+            new_population += [create_new_member(para_length,code_length)]
+        #replace the old population with a real copy
+        population = copy.deepcopy(new_population)
+        plots.append(best_growth_score_GA)
+        
+        
+    print("\n \n ************************************\n GA is Finished.")
+    print("Growth Score of {}\n With Parameters {} from {}".format(best_growth_score_GA, best_growth_params, list))
+     
+    best_growth_params_1=best_growth_params[0]
+#        best_growth_params_2=best_growth_params[1]
+    
+    plt.plot(plots)
+    plt.show()
+    
+    table = dynamodb.Table('LatestOptimisation')
+    table3 = dynamodb.Table('OptimisationHistory')
+    
+    print(table.creation_date_time)
+            
+    
+    d = datetime.datetime.utcnow()
+    epoch = datetime.datetime(1970,1,1)
+    t = (d - epoch).total_seconds()
+
+
+    table.update_item(
+    Key={
+        'ID': 1
+    },
+    UpdateExpression='SET RecommendedDayHours = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(best_growth_params_1)
+    })
+    
+    table.update_item(
+    Key={
+        'ID': 1
+    },
+    UpdateExpression='SET CurrentGrowth = :val1',
+    ExpressionAttributeValues={
+        ':val1': 7777 #EDIT GROWTH VALUE HERE
+    })
+    
+    table.update_item(
+     Key={
+        'ID': 1
+    },
+    UpdateExpression='SET PredictedGrowth = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(best_growth_score_GA)
+    })
+    
+    table.update_item(
+     Key={
+        'ID': 1
+    },
+    UpdateExpression='SET EpochTime = :val1',
+    ExpressionAttributeValues={
+        ':val1': Decimal(t)
+    })    
+        
+    table.update_item(
+     Key={
+        'ID': 1
+    },
+    UpdateExpression='SET RecipeUUID = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(uuid.uuid4())
+    })    
+    
+    #print (best_growth_params)
+    
+    table3.put_item(
+       Item={
+            'EpochTime': Decimal(t),
+            'RecipeUUID': str(uuid.uuid4()),
+            'RecommendedDayHours': str(best_growth_params_1),
+            'CurrentGrowth': 7777, #EDIT GROWTH VALUE HERE
+            'PredictedGrowth': str(best_growth_score_GA)                
+        })
+
+    global final_best_params
+    
+    final_best_params.append(best_growth_params_1)
+    
+    growth__score=7777 #EDIT GROWTH VALUE HERE
+      
+    power_3=best_growth_params_1**3
+    
+    power_2=best_growth_params_1**2
+    
+    power_1=best_growth_params_1
+    
+    power_0=1
+        
+    #MODEL AUGMENTATION POINT
+        
+    x = [float(i) for i in column_4] #all existing recommended parameter values (including augmented)
+    xx = np.arange(0,24,0.25)
+    
+    #Uniform Criterion
+    
+    minimums=[]
+    for element in xx:
+        new_dist=[]
+        for item in x:
+            new_dist.append(distance.euclidean(element,item))
+#        print (new_dist)
+        minimum=min(new_dist)
+        minimums.append(minimum)
+#    print (minimums)
+        
+    unicri_c=xx[np.argmax(minimums)]
+    
+    power__3=unicri_c**3
+    
+    power__2=unicri_c**2
+    
+    power__1=unicri_c
+    
+    power__0=1
+    
+    table2.put_item(
+       Item={
+            'EpochTime': Decimal(t),
+            'CurrentGrowth': str(growth__score), #EDIT GROWTH VALUE HERE
+            'X^3': str(power_3),
+            'X^2': str(power_2),
+            'X^1': str(power_1),
+            'X^0': str(power_0) ,
+            'X^3_Augmented': str(power__3),
+            'X^2_Augmented': str(power__2),
+            'X^1_Augmented': str(power__1),
+            'X^0_Augmented': str(power__0)
+        })
+
+#Unable to add 2nd item to same table in the same round:
+# =============================================================================
+#     table4 = dynamodb.Table('LinearRegressionInputs')
+# 
+#     table4.put_item(
+#        Item={
+#             'EpochTime': Decimal(t),
+#             'CurrentGrowth': str(growth__score), #EDIT GROWTH VALUE HERE
+#             'X^3': str(power__3),
+#             'X^2': str(power__2),
+#             'X^1': str(power__1),
+#             'X^0': str(power__0)       
+#         })
+# =============================================================================
+
+    table = dynamodb.Table('LatestOptimisation')
+
+    table.update_item(
+    Key={
+        'ID': 2
+    },
+    UpdateExpression='SET RecommendedDayHours = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(unicri_c)
+    })
+    
+    table.update_item(
+    Key={
+        'ID': 2
+    },
+    UpdateExpression='SET CurrentGrowth = :val1',
+    ExpressionAttributeValues={
+        ':val1': 7777 #EDIT GROWTH VALUE HERE
+    })
+    
+    table.update_item(
+     Key={
+        'ID': 2
+    },
+    UpdateExpression='SET PredictedGrowth = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(best_growth_score_GA)
+    })
+    
+    table.update_item(
+     Key={
+        'ID': 2
+    },
+    UpdateExpression='SET EpochTime = :val1',
+    ExpressionAttributeValues={
+        ':val1': Decimal(t)
+    })    
+        
+    table.update_item(
+     Key={
+        'ID': 2
+    },
+    UpdateExpression='SET RecipeUUID = :val1',
+    ExpressionAttributeValues={
+        ':val1': str(uuid.uuid4())
+    })    
+
+#Unable to add 2nd item to same table in the same round:
+# =============================================================================
+#     table5 = dynamodb.Table('OptimisationHistory')
+#   
+#     table5.put_item(
+#        Item={
+#             'EpochTime': Decimal(t),
+#             'RecipeUUID': str(uuid.uuid4()),
+#             'RecommendedDayHours': str(unicri_c),
+#             'CurrentGrowth': 7777, #EDIT GROWTH VALUE HERE
+#             'PredictedGrowth': str(best_growth_score_GA)                
+#         })
+# =============================================================================
+
+    return True
+    
+
+
+#######################   BELOW HERE SITS GROWTH MODEL, WHICH CAN BE EDITED   ####################### 
+#coefficients=(1,2,7,9)
+
+def model(member, code_length, values):
+    #takes in a list of values for parameters and returns the score (expected growth score)
+    
+    #Change this number to reflect no. of parameters the model requires
+    expected_parameters = 1
+    score = 0
+    
+    if(len(values) < expected_parameters):
+        return score
+    
+    #Check if okay to parse to model
+    if expected_parameters != len(values):
+        print("!!! \n ************************ WARNING ************************ \n Member {} has more values than input model. \n Model has {} variables while gene has {}. \n Check the code_length input, the current code_length is {} \n Values are {}. \n!!!".format(member,expected_parameters,len(values),code_length,values))
+       
+    else:
+        #Model changes here
+#            print ('ALL COEFFICIENTS ARE', coefficients)
+        score = coefficients[0] + coefficients[1]*values[0] + coefficients[2]*values[0]**2 + coefficients[3]*values[0]**3
+    return score
+   
+# =============================================================================
+#             while a_number<=len(all_coefficients):
+#                 for ix,coefficient in enumerate(all_coefficients):
+#                     for idx,alphabet in enumerate(values):
+#                         scores = all_coefficients[ix][0] + all_coefficients[ix][1]*values[idx] + all_coefficients[ix][2]*values[idx]**2 + all_coefficients[ix][3]*values[idx]**3
+#                         scored.append(scores)
+#                 a_number += 1
+#         score=sum(scored)
+#         return score
+# =============================================================================
+
+##########################################################################
+
+def seq(start, stop, step=1):
+    n = int(round((stop - start)/float(step)))
+    if n > 1:
+        return([start + step*i for i in range(n+1)])
+    elif n == 1:
+        return([start])
+    else:
+        return([])
+
+
+number_of_iterations = 100
+parameters_list = ['RecommendedDayHours']  #ADD MORE PARAMETERS HERE IF THERE ARE; list of parameter names
+parameters_dict = {'RecommendedDayHours':list(seq(0, 24, 0.25))} #ADD MORE PARAMETERS HERE IF THERE ARE; dictionary containing the (min/max) #add one more comma within 'seq' for intervals    
+RunGA(parameters_list, parameters_dict, number_of_iterations)
+
+
+
+#THE FOLLOWING PORTIONS APPLY WHEN ALMOST THE ENTIRE CODE IS SURROUNDED BY DEF AND MAIN#
+
+# =============================================================================
+# #THIS PORTION AUTOMATICALLY EXITS CODE IF PREVIOUS RECOMMENDED PARAMETER EXACTLY THE SAME AS NEW RECOMMENDED PARAMETER (OPTIMAL VALUE REACHED)
+#     if final_best_params[-1] == round(Decimal(latest_parameter_1_value), 2):
+#         exit()
+# 
+# #THIS PORTION IS FOR IMMEDIATE AUTO-RE-RUNS
+#     else: #CAN ADD TIMER WITHIN FOR TIMED CONSTANT AUTO RE-RUNS
+#         sleep(0.000001) #FREQUENCY OF RE-OPTIMISATION, IN SECONDS
+#         main()
+# =============================================================================
+    
+# =============================================================================
+# #THIS PORTION IS FOR MANUAL RE-RUNS
+# #    else:
+# restart=input('Do you wish to start again?')
+# if restart=='yes': #TYPE 'yes' is response window to initiate restart
+#      main()
+# =============================================================================
